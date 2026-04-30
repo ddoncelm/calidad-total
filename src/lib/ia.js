@@ -152,3 +152,36 @@ export function extraerPasos(textoIA) {
     .map(l => { const m = l.match(/^(\d+)\.\s+(.+)/); return m ? m[2].trim() : null })
     .filter(p => p && p.length > 3)
 }
+
+// ── AMFE: analizar duplicados y proponer grupos de fusión ──────
+export function promptAMFEFusion({ proceso, aportaciones }) {
+  const lista = aportaciones.map((a, i) =>
+    `ID:${a.id} | Paso:"${a.paso_descripcion}" | Modo:"${a.modo_fallo}" | Efecto:"${a.efecto || ''}" | Causa:"${a.causa || ''}" | S:${a.severidad} O:${a.ocurrencia} D:${a.detectabilidad} NPR:${a.npr}`
+  ).join('\n')
+
+  return `Eres experto en AMFE sanitario. Analiza los siguientes modos de fallo identificados por diferentes profesionales en el proceso "${proceso.titulo}" (${proceso.unidad}).
+
+MODOS DE FALLO REGISTRADOS:
+${lista}
+
+Tu tarea:
+1. Identifica grupos de modos de fallo que sean esencialmente el mismo fallo expresado con palabras diferentes
+2. Para cada grupo propón un texto consolidado claro y preciso
+3. Los modos que sean claramente distintos NO los agrupes — deben quedar como modos independientes
+
+Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional:
+{
+  "grupos": [
+    {
+      "modo_fusionado": "Texto consolidado del modo de fallo",
+      "efecto": "Efecto consolidado",
+      "causa": "Causa raíz común",
+      "ids": ["uuid1", "uuid2"],
+      "razon": "Breve explicación de por qué se fusionan"
+    }
+  ],
+  "independientes": ["uuid3", "uuid4"]
+}
+
+Los "independientes" son los IDs de modos que no deben fusionarse con ningún otro.`
+}
