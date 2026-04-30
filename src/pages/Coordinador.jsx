@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { C, AMFE_TIPOS_PROCESO, isHeader } from '../lib/constants.js'
 import { llamarIA, promptSintesis, promptInforme, promptAMFEPasos, promptAMFESintesis, promptAMFEInforme, extraerPropuestas, extraerPasos } from '../lib/ia.js'
+import FusionAMFE from './FusionAMFE.jsx'
 import { exportarPDF, exportarRTF } from '../lib/exportar.js'
 import { Isologo, BtnPrincipal, EstadoBadge, AlertaInfo, ModalConfirm, CargandoIA, inputStyle, labelStyle } from '../components/UI.jsx'
 
@@ -195,6 +196,8 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
   const [acciones, setAcciones] = useState([])
   const [ranking, setRanking] = useState([])
   const [rankingAmfe, setRankingAmfe] = useState([])
+  const [fusiones, setFusiones] = useState([])
+  const [vistaFusion, setVistaFusion] = useState(false)
   const [informe, setInforme] = useState(null)
   const [pasos, setPasos] = useState([])
   const [tab, setTab] = useState(proceso.tipo === 'amfe' ? 'pasos' : 'aportaciones')
@@ -220,14 +223,15 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
     } else {
       queries.push(supabase.from('pasos_amfe').select('*').eq('proceso_id', proceso.id).order('orden'))
       queries.push(supabase.from('ranking_amfe').select('*').eq('proceso_id', proceso.id))
+      queries.push(supabase.from('fusiones_amfe').select('*').eq('proceso_id', proceso.id).order('npr_medio', { ascending: false }))
     }
-    const [aport, acc, inf, proc, extra1, extra2] = await Promise.all(queries)
+    const [aport, acc, inf, proc, extra1, extra2, extra3] = await Promise.all(queries)
     setAportaciones(aport.data || [])
     setAcciones(acc.data || [])
     setInforme(inf.data || null)
     if (proc.data) setProceso(proc.data)
     if (proceso.tipo !== 'amfe') { setPropuestas(extra1.data || []); setRanking(extra2.data || []) }
-    else { setPasos(extra1.data || []); setRankingAmfe(extra2.data || []) }
+    else { setPasos(extra1.data || []); setRankingAmfe(extra2.data || []); setFusiones(extra3?.data || []) }
     setCargando(false)
   }
 
@@ -334,7 +338,11 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
             {tab === 'aportaciones' && <TabAportaciones aportaciones={aportaciones} tipo={proceso.tipo} />}
             {tab === 'propuestas' && <TabPropuestas propuestas={propuestas} procesoId={proceso.id} sintetizando={sintetizando} sintesisGenerada={proceso.sintesis_generada} onSintetizar={sintetizarPropuestas} onRefresh={cargarTodo} />}
             {tab === 'ranking' && <TabRanking ranking={ranking} />}
-            {tab === 'rankingAmfe' && <TabRankingAMFE ranking={rankingAmfe} />}
+            {tab === 'rankingAmfe' && (
+              vistaFusion
+                ? <FusionAMFE proceso={proceso} aportaciones={aportaciones.map(a => ({...a, paso_descripcion: pasos.find(p => p.id === a.paso_id)?.descripcion || ''}))} onFinalizar={() => { setVistaFusion(false); cargarTodo() }} />
+                : <TabRankingAMFE ranking={rankingAmfe} fusiones={fusiones} aportaciones={aportaciones} onFusionar={() => setVistaFusion(true)} onRefresh={cargarTodo} />
+            )}
             {tab === 'acciones' && <TabAcciones acciones={acciones} procesoId={proceso.id} onRefresh={cargarTodo} />}
             {tab === 'pines' && <TabPines procesoId={proceso.id} />}
             {tab === 'informe' && <TabInforme informe={informe} proceso={proceso} ranking={proceso.tipo === 'amfe' ? rankingAmfe : ranking} acciones={acciones} aportaciones={aportaciones} generandoInforme={generandoInforme} onGenerar={generarInforme} esAMFE={proceso.tipo === 'amfe'} />}
@@ -413,38 +421,69 @@ function TabPasosAMFE({ proceso, pasos, onRefresh }) {
 }
 
 // ── TAB RANKING AMFE ───────────────────────────────────────────
-function TabRankingAMFE({ ranking }) {
-  if (ranking.length === 0) return <div style={{ textAlign: 'center', padding: '40px', color: C.textoSuave }}>El ranking NPR se genera cuando los participantes completan el análisis AMFE</div>
-  const criticos = ranking.filter(r => r.critico)
+function TabRankingAMFE({ ranking, fusiones, aportaciones, onFusionar, onRefresh }) {
+  const tieneFusiones = fusiones && fusiones.length > 0
+  const datos = tieneFusiones ? fusiones : ranking
+  const criticos = datos.filter(r => r.npr_medio >= 100 || r.severidad_media >= 8)
+
+  if (aportaciones.length === 0) return (
+    <div style={{ textAlign: 'center', padding: '40px', color: C.textoSuave }}>
+      El ranking NPR se genera cuando los participantes completan el análisis AMFE
+    </div>
+  )
+
   return (
     <div>
-      {criticos.length > 0 && (
-        <div style={{ background: `${C.rojo}12`, border: `1px solid ${C.rojo}30`, borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', borderLeft: `3px solid ${C.rojo}` }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', color: C.rojo }}>⚠ {criticos.length} modo(s) de fallo crítico(s)</div>
-          <div style={{ fontSize: '12px', color: C.textoSuave, marginTop: '4px' }}>NPR ≥ 100 o Severidad ≥ 8. Requieren atención prioritaria.</div>
+      {!tieneFusiones && aportaciones.length > 0 && (
+        <div style={{ background: `${C.morado}10`, border: `1px solid ${C.morado}30`, borderRadius: '14px', padding: '14px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '6px' }}>🤖 Análisis de duplicados disponible</div>
+          <div style={{ fontSize: '12px', color: C.textoSuave, marginBottom: '10px', lineHeight: '1.5' }}>
+            La IA puede identificar modos de fallo similares para que decidas cuáles fusionar antes del ranking definitivo.
+          </div>
+          <button onClick={onFusionar} style={{ width: '100%', padding: '12px', background: `linear-gradient(135deg,${C.morado},${C.moradoClaro})`, color: C.blanco, border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+            🤖 Analizar y fusionar duplicados
+          </button>
         </div>
       )}
-      {ranking.map((r, i) => (
-        <div key={i} style={{ background: C.blanco, borderRadius: '14px', padding: '16px', marginBottom: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderLeft: `4px solid ${r.critico ? C.rojo : r.npr_medio >= 50 ? C.naranja : C.verde}` }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '10px', color: C.textoSuave, marginBottom: '4px' }}>Paso {r.paso_orden}: {r.paso_descripcion}</div>
-              <div style={{ fontSize: '13px', fontWeight: '700', color: C.texto }}>{r.modo_fallo}</div>
-              {r.efecto && <div style={{ fontSize: '12px', color: C.textoSuave, marginTop: '3px' }}>Efecto: {r.efecto}</div>}
-              {r.severidad_media >= 8 && <div style={{ fontSize: '11px', color: C.rojo, fontWeight: '700', marginTop: '4px' }}>⚠ Severidad crítica: {r.severidad_media}</div>}
-              <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '6px' }}>{r.n_aportaciones} aportación(es) · Dispersión NPR: ±{r.npr_desviacion || 0}</div>
-            </div>
-            <div style={{ background: r.critico ? `${C.rojo}12` : `${C.morado}10`, borderRadius: '12px', padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
-              <div style={{ fontSize: '20px', fontWeight: '800', color: r.critico ? C.rojo : C.morado }}>{r.npr_medio?.toFixed(0)}</div>
-              <div style={{ fontSize: '8px', color: C.textoSuave }}>NPR</div>
-              <div style={{ fontSize: '9px', color: C.textoSuave, marginTop: '4px' }}>S{r.severidad_media?.toFixed(1)}·O{r.ocurrencia_media?.toFixed(1)}·D{r.detectabilidad_media?.toFixed(1)}</div>
+      {tieneFusiones && (
+        <div style={{ background: `${C.verde}10`, border: `1px solid ${C.verde}30`, borderRadius: '12px', padding: '10px 14px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '12px', color: C.verde, fontWeight: '700' }}>✅ {fusiones.length} modos consolidados tras fusión</div>
+          <button onClick={onFusionar} style={{ background: `${C.morado}18`, border: 'none', color: C.morado, borderRadius: '8px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: '700' }}>Revisar</button>
+        </div>
+      )}
+      {criticos.length > 0 && (
+        <div style={{ background: `${C.rojo}12`, border: `1px solid ${C.rojo}30`, borderRadius: '12px', padding: '12px 14px', marginBottom: '16px', borderLeft: `3px solid ${C.rojo}` }}>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: C.rojo }}>⚠ {criticos.length} modo(s) crítico(s) — NPR ≥ 100 o S ≥ 8</div>
+        </div>
+      )}
+      {datos.map((r, i) => {
+        const esCritico = r.npr_medio >= 100 || r.severidad_media >= 8
+        return (
+          <div key={i} style={{ background: C.blanco, borderRadius: '14px', padding: '16px', marginBottom: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderLeft: `4px solid ${esCritico ? C.rojo : r.npr_medio >= 50 ? C.naranja : C.verde}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: C.texto }}>{r.modo_fusionado || r.modo_fallo}</div>
+                {r.efecto && <div style={{ fontSize: '12px', color: C.textoSuave, marginTop: '3px' }}>Efecto: {r.efecto}</div>}
+                {r.causa && <div style={{ fontSize: '12px', color: C.textoSuave, marginTop: '2px' }}>Causa: {r.causa}</div>}
+                {esCritico && <div style={{ fontSize: '11px', color: C.rojo, fontWeight: '700', marginTop: '4px' }}>⚠ Severidad crítica ≥ 8</div>}
+                <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '6px' }}>
+                  {r.n_profesionales || r.n_aportaciones || 1} profesional(es)
+                  {tieneFusiones && r.n_profesionales > 1 && <span style={{ color: C.morado, fontWeight: '700' }}> · Fusionado</span>}
+                </div>
+              </div>
+              <div style={{ background: esCritico ? `${C.rojo}12` : `${C.morado}10`, borderRadius: '12px', padding: '10px 12px', textAlign: 'center', flexShrink: 0 }}>
+                <div style={{ fontSize: '20px', fontWeight: '800', color: esCritico ? C.rojo : C.morado }}>{Number(r.npr_medio)?.toFixed(0)}</div>
+                <div style={{ fontSize: '8px', color: C.textoSuave }}>NPR</div>
+                <div style={{ fontSize: '9px', color: C.textoSuave, marginTop: '4px' }}>S{Number(r.severidad_media)?.toFixed(1)}·O{Number(r.ocurrencia_media)?.toFixed(1)}·D{Number(r.detectabilidad_media)?.toFixed(1)}</div>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
+
 
 // ── TAB APORTACIONES ───────────────────────────────────────────
 function TabAportaciones({ aportaciones, tipo }) {
