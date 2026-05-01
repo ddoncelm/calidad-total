@@ -172,66 +172,67 @@ export function exportarRTF(proceso, contenidoIA, ranking, acciones, aportacione
   URL.revokeObjectURL(url)
 }
 
-// ── INFORME AMFE COMPLETO — PDF ────────────────────────────────
-export function exportarInformeAMFEPDF({ proceso, pasos, modos, acciones, aportaciones, resumenIA, participantes, coordinadores }) {
+// ── INFORME AMFE COMPLETO — PDF (landscape, opción B: una fila por acción) ──
+export function exportarInformeAMFEPDF({ proceso, pasos, filas, acciones, aportaciones, resumenIA, participantes, coordinadores }) {
   const fecha = new Date().toLocaleDateString('es-ES')
   const colorMorado = '#6c3483'
-  const criticos = modos.filter(m => m.npr_medio >= 100 || m.severidad_media >= 8)
+  const factColor = { Alta: '#2d7a3a', Media: '#e67e22', Baja: '#c0392b' }
+  const cats = [...new Set(aportaciones.map(a => a.participaciones?.categoria).filter(Boolean))]
+  const criticos = (filas || []).filter(f => f.modo?.npr_medio >= 100 || f.modo?.severidad_media >= 8)
 
-  // Construir filas de la tabla AMFE
-  const filasTabla = modos.map((m, i) => {
-    const accion = acciones.find(a => a.observaciones?.includes(m.modo_fusionado || m.modo_fallo)) || acciones[i] || {}
-    const paso = pasos.find(p => p.id === m.paso_id) || {}
-    return `
-    <tr style="background:${i % 2 === 0 ? '#f9f4fd' : '#fff'};">
-      <td>${paso.descripcion || '—'}</td>
-      <td style="text-align:center;font-weight:700;">${i + 1}</td>
-      <td style="font-weight:600;">${m.modo_fusionado || m.modo_fallo || '—'}</td>
-      <td>${m.efecto || '—'}</td>
-      <td>${m.causa || '—'}</td>
-      <td style="text-align:center;">${Number(m.ocurrencia_media).toFixed(1)}</td>
-      <td style="text-align:center;">${Number(m.severidad_media).toFixed(1)}</td>
-      <td style="text-align:center;">${Number(m.detectabilidad_media).toFixed(1)}</td>
-      <td style="text-align:center;font-weight:800;color:${m.npr_medio >= 100 || m.severidad_media >= 8 ? '#c0392b' : m.npr_medio >= 50 ? '#e67e22' : '#2d7a3a'};">${Number(m.npr_medio).toFixed(0)}</td>
-      <td>${accion.descripcion || '—'}</td>
-      <td>${accion.responsable || '—'}</td>
-      <td>${accion.indicador || '—'}</td>
-      <td>${accion.plazo ? new Date(accion.plazo).toLocaleDateString('es-ES') : '—'}</td>
-      <td>${m.factibilidad || '—'}</td>
+  const filasHTML = (filas || []).map((f, i) => {
+    const { accion, modo, paso } = f
+    const esCritico = modo?.npr_medio >= 100 || modo?.severidad_media >= 8
+    const fact = accion.factibilidad || '—'
+    const factC = factColor[accion.factibilidad] || '#666'
+    return `<tr style="background:${i % 2 === 0 ? '#f9f4fd' : '#fff'}">
+      <td style="font-size:7.5pt">${paso?.descripcion || '—'}</td>
+      <td style="text-align:center;font-weight:700;font-size:7.5pt">${i + 1}</td>
+      <td style="font-weight:600;font-size:7.5pt;color:${esCritico ? '#c0392b' : '#1a1a1a'}">${modo?.modo_fusionado || modo?.modo_fallo || accion.descripcion}</td>
+      <td style="font-size:7.5pt">${modo?.efecto || '—'}</td>
+      <td style="font-size:7.5pt">${modo?.causa || '—'}</td>
+      <td style="text-align:center;font-size:7.5pt">${modo?.ocurrencia_media ? Number(modo.ocurrencia_media).toFixed(1) : '—'}</td>
+      <td style="text-align:center;font-size:7.5pt">${modo?.severidad_media ? Number(modo.severidad_media).toFixed(1) : '—'}</td>
+      <td style="text-align:center;font-size:7.5pt">${modo?.detectabilidad_media ? Number(modo.detectabilidad_media).toFixed(1) : '—'}</td>
+      <td style="text-align:center;font-weight:800;font-size:8pt;color:${esCritico ? '#c0392b' : modo?.npr_medio >= 50 ? '#e67e22' : '#2d7a3a'}">${modo?.npr_medio ? Number(modo.npr_medio).toFixed(0) : '—'}</td>
+      <td style="font-size:7.5pt">${accion.descripcion || '—'}</td>
+      <td style="font-size:7.5pt">${accion.responsable || '—'}</td>
+      <td style="font-size:7.5pt">${accion.indicador || '—'}</td>
+      <td style="font-size:7.5pt">${accion.plazo ? new Date(accion.plazo).toLocaleDateString('es-ES') : '—'}</td>
+      <td style="font-size:7.5pt;font-weight:700;color:${factC}">${fact}</td>
     </tr>`
   }).join('')
-
-  // Categorías de participantes
-  const cats = [...new Set(aportaciones.map(a => a.participaciones?.categoria).filter(Boolean))]
 
   const html = `<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"/>
 <title>Informe AMFE · ${proceso.codigo}</title>
 <style>
+@page { size: A4 landscape; margin: 12mm; }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;font-size:9pt;color:#1a1a1a;line-height:1.4}
-.cab{background:linear-gradient(135deg,${colorMorado},#9b59b6);color:#fff;padding:20px 28px;margin-bottom:20px}
-.cab h1{font-size:18pt;font-weight:800}
-.cab .sub{font-size:10pt;opacity:.85;margin-top:4px}
-.cab .meta{margin-top:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:9pt;opacity:.9}
-.sec{padding:0 20px;margin-bottom:18px}
-.sec h2{font-size:11pt;font-weight:700;color:${colorMorado};border-bottom:2px solid #e8d5f5;padding-bottom:5px;margin-bottom:10px}
-.ia{background:#f9f4fd;border-left:3px solid ${colorMorado};padding:12px;border-radius:4px;white-space:pre-wrap;font-size:9pt;line-height:1.6}
-.tabla-wrap{overflow-x:auto;padding:0 20px;margin-bottom:20px}
-table{width:100%;border-collapse:collapse;font-size:8pt}
-th{background:${colorMorado};color:#fff;padding:6px 4px;text-align:left;font-size:8pt;font-weight:700}
-td{padding:5px 4px;border-bottom:1px solid #e0d5f0;vertical-align:top}
-.critico{color:#c0392b;font-weight:700}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-.stat{background:#f9f4fd;border-radius:8px;padding:8px 14px;text-align:center;border:1px solid #e8d5f5}
-.stat .n{font-size:18pt;font-weight:800;color:${colorMorado}}
-.stat .l{font-size:8pt;color:#666}
-.footer{margin-top:24px;padding:12px 20px;border-top:2px solid #e8d5f5;display:flex;justify-content:space-between;font-size:8pt;color:#999}
-@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact}}
+body{font-family:Arial,sans-serif;font-size:8pt;color:#1a1a1a;line-height:1.3}
+.cab{background:linear-gradient(135deg,${colorMorado},#9b59b6);color:#fff;padding:14px 20px;margin-bottom:14px;border-radius:4px}
+.cab h1{font-size:14pt;font-weight:800}
+.cab .meta{margin-top:8px;display:flex;gap:16px;flex-wrap:wrap;font-size:8pt;opacity:.9}
+.sec{margin-bottom:12px}
+.sec h2{font-size:9pt;font-weight:700;color:${colorMorado};border-bottom:2px solid #e8d5f5;padding-bottom:4px;margin-bottom:8px}
+.ia{background:#f9f4fd;border-left:3px solid ${colorMorado};padding:10px;border-radius:4px;white-space:pre-wrap;font-size:8pt;line-height:1.5}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.stat{background:#f9f4fd;border-radius:6px;padding:6px 12px;text-align:center;border:1px solid #e8d5f5}
+.stat .n{font-size:14pt;font-weight:800;color:${colorMorado}}
+.stat .l{font-size:7pt;color:#666}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{background:${colorMorado};color:#fff;padding:5px 3px;text-align:left;font-size:7.5pt;font-weight:700;word-wrap:break-word}
+td{padding:4px 3px;border-bottom:1px solid #e0d5f0;vertical-align:top;word-wrap:break-word}
+.footer{margin-top:12px;padding:8px 0;border-top:2px solid #e8d5f5;display:flex;justify-content:space-between;font-size:7pt;color:#999}
+@media print{
+  body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .cab{-webkit-print-color-adjust:exact}
+  th{-webkit-print-color-adjust:exact}
+}
 </style></head><body>
 
 <div class="cab">
-  <div class="sub">Análisis Modal de Fallos y Efectos (AMFE)</div>
+  <div style="font-size:9pt;opacity:.85;margin-bottom:4px">Análisis Modal de Fallos y Efectos (AMFE) — Informe para Dirección / Auditoría</div>
   <h1>${proceso.titulo}</h1>
   <div class="meta">
     <span>📋 ${proceso.codigo}</span>
@@ -241,55 +242,54 @@ td{padding:5px 4px;border-bottom:1px solid #e0d5f0;vertical-align:top}
   </div>
 </div>
 
-<div class="sec">
-  <h2>Coordinadores de calidad</h2>
-  <div style="font-size:9.5pt;line-height:1.8">${coordinadores ? coordinadores.split('\n').map(c => `• ${c}`).join('<br>') : '— No especificado —'}</div>
-</div>
-
-<div class="sec">
-  <h2>Participantes</h2>
-  <div style="margin-bottom:8px;font-size:9pt;color:#555">Categorías profesionales: <strong>${cats.join(', ') || '—'}</strong></div>
-  ${participantes ? `<div style="font-size:9pt;line-height:1.8">${participantes.split('\n').filter(p=>p.trim()).map(p=>`• ${p}`).join('<br>')}</div>` : '<div style="font-size:9pt;color:#888">Nombres no especificados</div>'}
-</div>
-
-<div class="sec">
-  <div class="stats">
-    <div class="stat"><div class="n">${pasos.length}</div><div class="l">Pasos analizados</div></div>
-    <div class="stat"><div class="n">${modos.length}</div><div class="l">Modos de fallo</div></div>
-    <div class="stat"><div class="n" style="color:#c0392b">${criticos.length}</div><div class="l">Críticos (NPR≥100 o S≥8)</div></div>
-    <div class="stat"><div class="n">${acciones.length}</div><div class="l">Acciones planteadas</div></div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+  <div class="sec">
+    <h2>Coordinadores de calidad</h2>
+    <div style="font-size:8pt;line-height:1.7">${coordinadores ? coordinadores.split('\n').filter(c=>c.trim()).map(c=>`• ${c}`).join('<br>') : '— No especificado —'}</div>
+  </div>
+  <div class="sec">
+    <h2>Equipo participante</h2>
+    <div style="font-size:8pt;margin-bottom:4px">Categorías: <strong>${cats.join(', ') || '—'}</strong></div>
+    ${participantes ? `<div style="font-size:8pt;line-height:1.7">${participantes.split('\n').filter(p=>p.trim()).map(p=>`• ${p}`).join('<br>')}</div>` : '<div style="font-size:8pt;color:#888">Nombres no especificados</div>'}
   </div>
 </div>
 
-${resumenIA ? `<div class="sec"><h2>Resumen ejecutivo · Análisis IA</h2><div class="ia">${resumenIA}</div></div>` : ''}
+<div class="stats">
+  <div class="stat"><div class="n">${pasos?.length || 0}</div><div class="l">Pasos</div></div>
+  <div class="stat"><div class="n">${filas?.length || 0}</div><div class="l">Acciones</div></div>
+  <div class="stat"><div class="n" style="color:#c0392b">${criticos.length}</div><div class="l">Críticos</div></div>
+  <div class="stat"><div class="n" style="color:#2d7a3a">${acciones.filter(a=>a.factibilidad==='Alta').length}</div><div class="l">Alta fact.</div></div>
+  <div class="stat"><div class="n" style="color:#e67e22">${acciones.filter(a=>a.factibilidad==='Media').length}</div><div class="l">Media fact.</div></div>
+  <div class="stat"><div class="n" style="color:#c0392b">${acciones.filter(a=>a.factibilidad==='Baja').length}</div><div class="l">Baja fact.</div></div>
+</div>
 
-<div class="tabla-wrap">
-  <h2 style="color:${colorMorado};font-size:11pt;font-weight:700;border-bottom:2px solid #e8d5f5;padding-bottom:5px;margin-bottom:10px;padding-left:0">Tabla AMFE</h2>
+${resumenIA ? `<div class="sec"><h2>Resumen ejecutivo</h2><div class="ia">${resumenIA}</div></div>` : ''}
+
+<div class="sec" style="margin-top:14px">
+  <h2>Tabla AMFE</h2>
   <table>
+    <colgroup>
+      <col style="width:9%"><col style="width:3%"><col style="width:9%">
+      <col style="width:7%"><col style="width:7%">
+      <col style="width:4%"><col style="width:4%"><col style="width:4%"><col style="width:3.5%">
+      <col style="width:11%"><col style="width:8%"><col style="width:9%">
+      <col style="width:5%"><col style="width:7%">
+    </colgroup>
     <thead>
       <tr>
-        <th style="min-width:100px">Actividades</th>
-        <th style="width:30px">Id</th>
-        <th style="min-width:110px">Fallos</th>
-        <th style="min-width:90px">Efectos</th>
-        <th style="min-width:90px">Causas</th>
-        <th style="width:50px">Frecuencia (O)</th>
-        <th style="width:50px">Gravedad (S)</th>
-        <th style="width:60px">Detectab. (D)</th>
-        <th style="width:40px">NPR</th>
-        <th style="min-width:100px">Acción de mejora</th>
-        <th style="min-width:80px">Responsable</th>
-        <th style="min-width:80px">Indicador</th>
-        <th style="width:60px">Plazo</th>
-        <th style="min-width:80px">Factibilidad / Viabilidad</th>
+        <th>Actividades</th><th>Id</th><th>Fallos</th>
+        <th>Efectos</th><th>Causas</th>
+        <th>Frecuencia (O)</th><th>Gravedad (S)</th><th>Detectab. (D)</th><th>NPR</th>
+        <th>Acción de mejora</th><th>Responsable</th><th>Indicador de evaluación</th>
+        <th>Plazo</th><th>Factibilidad / Viabilidad</th>
       </tr>
     </thead>
-    <tbody>${filasTabla}</tbody>
+    <tbody>${filasHTML || '<tr><td colspan="14" style="text-align:center;padding:12px;color:#999">Sin acciones registradas</td></tr>'}</tbody>
   </table>
 </div>
 
 <div class="footer">
-  <span>Calidad Total SAS · ${proceso.codigo} · ${fecha}</span>
+  <span>Calidad Total SAS · ${proceso.codigo} · ${fecha} · Documento confidencial — Uso interno</span>
   <span>doncelproject · doncel.project@gmail.com</span>
 </div>
 </body></html>`
@@ -301,8 +301,8 @@ ${resumenIA ? `<div class="sec"><h2>Resumen ejecutivo · Análisis IA</h2><div c
   setTimeout(() => w.print(), 600)
 }
 
-// ── INFORME AMFE COMPLETO — RTF ────────────────────────────────
-export function exportarInformeAMFERTF({ proceso, pasos, modos, acciones, aportaciones, resumenIA, participantes, coordinadores }) {
+// ── INFORME AMFE COMPLETO — RTF (opción B) ─────────────────────
+export function exportarInformeAMFERTF({ proceso, pasos, filas, acciones, aportaciones, resumenIA, participantes, coordinadores }) {
   const fecha = new Date().toLocaleDateString('es-ES')
   const e = (t) => {
     if (!t) return ''
@@ -318,56 +318,57 @@ export function exportarInformeAMFERTF({ proceso, pasos, modos, acciones, aporta
 
   const lines = [
     '{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}',
-    '{\\colortbl;\\red108\\green52\\blue131;\\red192\\green57\\blue43;\\red230\\green126\\blue34;}',
-    '\\f0\\fs22\\paperw11906\\paperh16838\\margl1200\\margr1200\\margt1200\\margb1200',
-    `{\\pard\\fs28\\b\\cf1 ${e('Informe AMFE · ' + proceso.titulo)}\\par}`,
-    `{\\pard\\fs20 ${e('Código: ' + proceso.codigo + ' · Unidad: ' + proceso.unidad + ' · Fecha: ' + fecha)}\\par}`,
+    '{\\colortbl;\\red108\\green52\\blue131;\\red192\\green57\\blue43;\\red230\\green126\\blue34;\\red45\\green122\\blue58;}',
+    '\\f0\\fs20\\paperw16838\\paperh11906\\margl800\\margr800\\margt800\\margb800\\landscape',
+    `{\\pard\\fs26\\b\\cf1 ${e('Informe AMFE · ' + proceso.titulo)}\\par}`,
+    `{\\pard\\fs18 ${e('Código: ' + proceso.codigo + ' · Unidad: ' + proceso.unidad + ' · Fecha: ' + fecha)}\\par}`,
+    `{\\pard\\fs18 ${e('Documento para Dirección / Auditoría externa')}\\par}`,
     '{\\pard\\par}',
   ]
 
   if (coordinadores) {
-    lines.push(`{\\pard\\fs22\\b\\cf1 ${e('COORDINADORES DE CALIDAD')}\\par}`)
+    lines.push(`{\\pard\\fs20\\b\\cf1 ${e('COORDINADORES DE CALIDAD')}\\par}`)
     coordinadores.split('\n').filter(c => c.trim()).forEach(c => {
-      lines.push(`{\\pard\\fs20 ${e('• ' + c)}\\par}`)
+      lines.push(`{\\pard\\fs18 ${e('• ' + c)}\\par}`)
     })
     lines.push('{\\pard\\par}')
   }
 
-  lines.push(`{\\pard\\fs22\\b\\cf1 ${e('PARTICIPANTES')}\\par}`)
-  lines.push(`{\\pard\\fs20 ${e('Categorías: ' + (cats.join(', ') || '—'))}\\par}`)
+  lines.push(`{\\pard\\fs20\\b\\cf1 ${e('EQUIPO PARTICIPANTE')}\\par}`)
+  lines.push(`{\\pard\\fs18 ${e('Categorías: ' + (cats.join(', ') || '—'))}\\par}`)
   if (participantes) {
     participantes.split('\n').filter(p => p.trim()).forEach(p => {
-      lines.push(`{\\pard\\fs20 ${e('• ' + p)}\\par}`)
+      lines.push(`{\\pard\\fs18 ${e('• ' + p)}\\par}`)
     })
   }
   lines.push('{\\pard\\par}')
 
   if (resumenIA) {
-    lines.push(`{\\pard\\fs22\\b\\cf1 ${e('RESUMEN EJECUTIVO')}\\par}`)
+    lines.push(`{\\pard\\fs20\\b\\cf1 ${e('RESUMEN EJECUTIVO')}\\par}`)
     resumenIA.split('\n').filter(l => l.trim()).forEach(l => {
-      lines.push(`{\\pard\\fs20 ${e(l)}\\par}`)
+      lines.push(`{\\pard\\fs18 ${e(l)}\\par}`)
     })
     lines.push('{\\pard\\par}')
   }
 
-  lines.push(`{\\pard\\fs22\\b\\cf1 ${e('TABLA AMFE')}\\par}`)
+  lines.push(`{\\pard\\fs20\\b\\cf1 ${e('TABLA AMFE (una fila por acción)')}\\par}`)
   lines.push('{\\pard\\par}')
 
-  modos.forEach((m, i) => {
-    const accion = acciones.find(a => a.observaciones?.includes(m.modo_fusionado || m.modo_fallo)) || acciones[i] || {}
-    const paso = pasos.find(p => p.id === m.paso_id) || {}
-    const esCritico = m.npr_medio >= 100 || m.severidad_media >= 8
-    lines.push(`{\\pard\\fs21\\b ${e(`${i + 1}. ${m.modo_fusionado || m.modo_fallo}`)}${esCritico ? ' {\\cf2 [CRÍTICO]}' : ''}\\par}`)
-    lines.push(`{\\pard\\fs20 ${e(`Actividad: ${paso.descripcion || '—'}`)}\\par}`)
-    lines.push(`{\\pard\\fs20 ${e(`Efecto: ${m.efecto || '—'} | Causa: ${m.causa || '—'}`)}\\par}`)
-    lines.push(`{\\pard\\fs20 ${e(`O(Frecuencia): ${Number(m.ocurrencia_media).toFixed(1)} | S(Gravedad): ${Number(m.severidad_media).toFixed(1)} | D(Detectab.): ${Number(m.detectabilidad_media).toFixed(1)} | NPR: ${Number(m.npr_medio).toFixed(0)}`)}\\par}`)
-    if (accion.descripcion) lines.push(`{\\pard\\fs20 ${e(`Acción: ${accion.descripcion} | Resp.: ${accion.responsable || '—'} | Plazo: ${accion.plazo ? new Date(accion.plazo).toLocaleDateString('es-ES') : '—'}`)}\\par}`)
-    if (m.factibilidad) lines.push(`{\\pard\\fs20 ${e(`Factibilidad: ${m.factibilidad}`)}\\par}`)
-    if (accion.indicador) lines.push(`{\\pard\\fs20 ${e(`Indicador: ${accion.indicador}`)}\\par}`)
+  ;(filas || []).forEach((f, i) => {
+    const { accion, modo, paso } = f
+    const esCritico = modo?.npr_medio >= 100 || modo?.severidad_media >= 8
+    lines.push(`{\\pard\\fs19\\b ${e(`${i + 1}. Acción: ${accion.descripcion}`)}${esCritico ? ' {\\cf2 [CRÍTICO]}' : ''}\\par}`)
+    lines.push(`{\\pard\\fs17 ${e(`Actividad/Paso: ${paso?.descripcion || '—'}`)}\\par}`)
+    lines.push(`{\\pard\\fs17 ${e(`Fallo: ${modo?.modo_fusionado || modo?.modo_fallo || '—'}`)}\\par}`)
+    lines.push(`{\\pard\\fs17 ${e(`Efecto: ${modo?.efecto || '—'} | Causa: ${modo?.causa || '—'}`)}\\par}`)
+    lines.push(`{\\pard\\fs17 ${e(`O(Frecuencia): ${modo?.ocurrencia_media ? Number(modo.ocurrencia_media).toFixed(1) : '—'} | S(Gravedad): ${modo?.severidad_media ? Number(modo.severidad_media).toFixed(1) : '—'} | D: ${modo?.detectabilidad_media ? Number(modo.detectabilidad_media).toFixed(1) : '—'} | NPR: ${modo?.npr_medio ? Number(modo.npr_medio).toFixed(0) : '—'}`)}\\par}`)
+    lines.push(`{\\pard\\fs17 ${e(`Responsable: ${accion.responsable || '—'} | Plazo: ${accion.plazo ? new Date(accion.plazo).toLocaleDateString('es-ES') : '—'}`)}\\par}`)
+    if (accion.indicador) lines.push(`{\\pard\\fs17 ${e(`Indicador: ${accion.indicador}`)}\\par}`)
+    lines.push(`{\\pard\\fs17\\b ${e(`Factibilidad: ${accion.factibilidad || 'No valorada'}`)}\\par}`)
     lines.push('{\\pard\\par}')
   })
 
-  lines.push(`{\\pard\\fs18 ${e('Calidad Total SAS · ' + proceso.codigo + ' · ' + fecha + ' · doncelproject · doncel.project@gmail.com')}\\par}`)
+  lines.push(`{\\pard\\fs16 ${e('Calidad Total SAS · ' + proceso.codigo + ' · ' + fecha + ' · doncelproject · doncel.project@gmail.com')}\\par}`)
   lines.push('}')
 
   const blob = new Blob([lines.join('\n')], { type: 'application/rtf' })
