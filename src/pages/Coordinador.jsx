@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase.js'
 import { C, AMFE_TIPOS_PROCESO, isHeader } from '../lib/constants.js'
-import { llamarIA, promptSintesis, promptInforme, promptAMFEPasos, promptAMFESintesis, promptAMFEInforme, extraerPropuestas, extraerPasos } from '../lib/ia.js'
+import { llamarIA, promptSintesis, promptInforme, promptAMFEPasos, promptAMFESintesis, promptAMFEInforme, promptPlanAccionAMFE, extraerPropuestas, extraerPasos } from '../lib/ia.js'
 import FusionAMFE from './FusionAMFE.jsx'
 import { exportarPDF, exportarRTF } from '../lib/exportar.js'
 import { Isologo, BtnPrincipal, EstadoBadge, AlertaInfo, ModalConfirm, CargandoIA, inputStyle, labelStyle } from '../components/UI.jsx'
@@ -205,6 +205,8 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
   const [modalEstado, setModalEstado] = useState(false)
   const [sintetizando, setSintetizando] = useState(false)
   const [generandoInforme, setGenerandoInforme] = useState(false)
+  const [generandoPlan, setGenerandoPlan] = useState(false)
+  const [propuestasParticipantes, setPropuestasParticipantes] = useState([])
 
   useEffect(() => { cargarTodo() }, [])
 
@@ -232,7 +234,59 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
     if (proc.data) setProceso(proc.data)
     if (proceso.tipo !== 'amfe') { setPropuestas(extra1.data || []); setRanking(extra2.data || []) }
     else { setPasos(extra1.data || []); setRankingAmfe(extra2.data || []); setFusiones(extra3?.data || []) }
+
+    // Cargar propuestas de participantes si es AMFE
+    if (proc.data?.tipo === 'amfe') {
+      const { data: propPart } = await supabase
+        .from('propuestas_accion_participantes')
+        .select('*, participaciones(pin, categoria)')
+        .eq('proceso_id', proceso.id)
+        .order('created_at')
+      setPropuestasParticipantes(propPart || [])
+    }
     setCargando(false)
+  }
+
+  const generarPlanAccionIA = async () => {
+    setGenerandoPlan(true)
+    try {
+      const modos = fusiones.length > 0 ? fusiones : rankingAmfe
+      if (modos.length === 0) { setGenerandoPlan(false); return }
+      const prompt = promptPlanAccionAMFE({ proceso, modos })
+      const texto = await llamarIA(prompt, 2000)
+      const limpio = texto.replace(/```json|```/g, '').trim()
+      const resultado = JSON.parse(limpio)
+      if (resultado.acciones && resultado.acciones.length > 0) {
+        for (const accion of resultado.acciones) {
+          const plazoDate = new Date()
+          plazoDate.setMonth(plazoDate.getMonth() + (accion.plazo_meses || 3))
+          await supabase.from('acciones').insert({
+            proceso_id: proceso.id,
+            descripcion: accion.descripcion,
+            responsable: accion.responsable,
+            plazo: plazoDate.toISOString().split('T')[0],
+            indicador: accion.indicador,
+            estado: 'pendiente',
+            observaciones: accion.modo_origen ? `Modo de fallo: ${accion.modo_origen}` : null,
+            generada_ia: true,
+          })
+        }
+        await cargarTodo()
+      }
+    } catch (e) { console.error('Error generando plan:', e) }
+    setGenerandoPlan(false)
+  }
+
+  const incorporarPropuesta = async (propuesta) => {
+    await supabase.from('acciones').insert({
+      proceso_id: proceso.id,
+      descripcion: propuesta.descripcion,
+      responsable: propuesta.responsable || '',
+      estado: 'pendiente',
+      observaciones: `Propuesto por participante (${propuesta.participaciones?.categoria || 'PIN ' + propuesta.participaciones?.pin})`,
+    })
+    await supabase.from('propuestas_accion_participantes').update({ incorporada: true }).eq('id', propuesta.id)
+    await cargarTodo()
   }
 
   const cambiarEstado = async (estado) => {
@@ -343,7 +397,7 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
                 ? <FusionAMFE proceso={proceso} aportaciones={aportaciones.map(a => ({...a, paso_descripcion: pasos.find(p => p.id === a.paso_id)?.descripcion || ''}))} onFinalizar={() => { setVistaFusion(false); cargarTodo() }} />
                 : <TabRankingAMFE ranking={rankingAmfe} fusiones={fusiones} aportaciones={aportaciones} onFusionar={() => setVistaFusion(true)} onRefresh={cargarTodo} />
             )}
-            {tab === 'acciones' && <TabAcciones acciones={acciones} procesoId={proceso.id} onRefresh={cargarTodo} />}
+            {tab === 'acciones' && <TabAcciones acciones={acciones} procesoId={proceso.id} onRefresh={cargarTodo} esAMFE={proceso.tipo === 'amfe'} generandoPlan={generandoPlan} onGenerarPlan={generarPlanAccionIA} propuestasParticipantes={propuestasParticipantes} onIncorporar={incorporarPropuesta} />}
             {tab === 'pines' && <TabPines procesoId={proceso.id} />}
             {tab === 'informe' && <TabInforme informe={informe} proceso={proceso} ranking={proceso.tipo === 'amfe' ? rankingAmfe : ranking} acciones={acciones} aportaciones={aportaciones} generandoInforme={generandoInforme} onGenerar={generarInforme} esAMFE={proceso.tipo === 'amfe'} />}
           </>
@@ -555,35 +609,148 @@ function TabRanking({ ranking }) {
 }
 
 // ── TAB ACCIONES ───────────────────────────────────────────────
-function TabAcciones({ acciones, procesoId, onRefresh }) {
+function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, onGenerarPlan, propuestasParticipantes, onIncorporar }) {
   const [nueva, setNueva] = useState({ descripcion: '', responsable: '', plazo: '', indicador: '' })
   const [añadiendo, setAñadiendo] = useState(false)
-  const crear = async () => { if (!nueva.descripcion) return; await supabase.from('acciones').insert({ proceso_id: procesoId, ...nueva }); setNueva({ descripcion: '', responsable: '', plazo: '', indicador: '' }); setAñadiendo(false); onRefresh() }
-  const cambiarEstado = async (id, estado) => { await supabase.from('acciones').update({ estado }).eq('id', id); onRefresh() }
+
+  const crear = async () => {
+    if (!nueva.descripcion) return
+    await supabase.from('acciones').insert({ proceso_id: procesoId, ...nueva })
+    setNueva({ descripcion: '', responsable: '', plazo: '', indicador: '' })
+    setAñadiendo(false)
+    onRefresh()
+  }
+
+  const cambiarEstado = async (id, estado) => {
+    await supabase.from('acciones').update({ estado }).eq('id', id)
+    onRefresh()
+  }
+
+  const borrarAccion = async (id) => {
+    await supabase.from('acciones').delete().eq('id', id)
+    onRefresh()
+  }
+
   const ec = { pendiente: C.naranja, en_curso: C.azul, completada: C.verde, cancelada: '#999' }
+  const accionesIA = acciones.filter(a => a.generada_ia)
+  const accionesManuales = acciones.filter(a => !a.generada_ia)
+  const propuestasPendientes = (propuestasParticipantes || []).filter(p => !p.incorporada)
+
   return (
     <div>
-      <BtnPrincipal onClick={() => setAñadiendo(!añadiendo)} label={añadiendo ? '✕ Cancelar' : '+ Nueva acción'} color={añadiendo ? '#999' : C.verde} />
+      {/* Botón generar plan con IA — solo AMFE */}
+      {esAMFE && acciones.filter(a => a.generada_ia).length === 0 && (
+        <div style={{ background: `${C.morado}10`, border: `1px solid ${C.morado}30`, borderRadius: '14px', padding: '14px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '6px' }}>
+            🤖 Generación automática del plan de acción
+          </div>
+          <div style={{ fontSize: '12px', color: C.textoSuave, marginBottom: '10px', lineHeight: '1.5' }}>
+            La IA analizará el ranking NPR y propondrá acciones concretas para cada modo de fallo crítico y moderado, con responsable, plazo e indicador.
+          </div>
+          {generandoPlan
+            ? <CargandoIA color={C.morado} mensaje="Generando plan de acción..." />
+            : <BtnPrincipal onClick={onGenerarPlan} label="🤖 Generar plan de acción con IA" color={C.morado} />
+          }
+        </div>
+      )}
+
+      {esAMFE && accionesIA.length > 0 && (
+        <div style={{ background: `${C.verde}10`, border: `1px solid ${C.verde}30`, borderRadius: '12px', padding: '10px 14px', marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '12px', color: C.verde, fontWeight: '700' }}>✅ {accionesIA.length} acción(es) generadas por IA</div>
+          {!generandoPlan && <button onClick={onGenerarPlan} style={{ background: `${C.morado}18`, border: 'none', color: C.morado, borderRadius: '8px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: '700' }}>Regenerar</button>}
+        </div>
+      )}
+
+      {/* Propuestas de participantes pendientes */}
+      {propuestasPendientes.length > 0 && (
+        <div style={{ background: `${C.teal}10`, border: `1px solid ${C.teal}30`, borderRadius: '14px', padding: '14px', marginBottom: '16px' }}>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: C.teal, marginBottom: '10px' }}>
+            💬 {propuestasPendientes.length} propuesta(s) de participantes pendientes de revisión
+          </div>
+          {propuestasPendientes.map((p, i) => (
+            <div key={i} style={{ background: C.blanco, borderRadius: '10px', padding: '12px', marginBottom: '8px', border: `1px solid ${C.teal}20` }}>
+              <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '4px' }}>{p.descripcion}</div>
+              {p.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {p.responsable}</div>}
+              <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px' }}>
+                Propuesto por: {p.participaciones?.categoria || 'Participante'}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button onClick={() => onIncorporar(p)} style={{ flex: 1, padding: '7px', border: 'none', borderRadius: '8px', background: C.verde, color: C.blanco, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+                  ✅ Incorporar al plan
+                </button>
+                <button onClick={async () => { await supabase.from('propuestas_accion_participantes').update({ incorporada: true }).eq('id', p.id); onRefresh() }} style={{ flex: 1, padding: '7px', border: `1px solid ${C.rojo}30`, borderRadius: '8px', background: `${C.rojo}10`, color: C.rojo, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+                  ❌ Descartar
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Añadir acción manual */}
+      <BtnPrincipal onClick={() => setAñadiendo(!añadiendo)} label={añadiendo ? '✕ Cancelar' : '+ Nueva acción manual'} color={añadiendo ? '#999' : C.verde} />
+
       {añadiendo && (
         <div style={{ background: C.blanco, borderRadius: '14px', padding: '16px', margin: '12px 0', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-          {[{ label: 'Descripción *', key: 'descripcion', ph: 'Qué hay que hacer...' }, { label: 'Responsable (cargo)', key: 'responsable', ph: 'Ej: Supervisora de enfermería' }, { label: 'Indicador', key: 'indicador', ph: 'Cómo medir que se cumple...' }].map(f => (
-            <div key={f.key} style={{ marginBottom: '12px' }}><div style={labelStyle}>{f.label}</div><input value={nueva[f.key]} onChange={e => setNueva(p => ({ ...p, [f.key]: e.target.value }))} placeholder={f.ph} style={inputStyle(nueva[f.key])} /></div>
+          {[
+            { label: 'Descripción *', key: 'descripcion', ph: 'Qué hay que hacer...' },
+            { label: 'Responsable (cargo)', key: 'responsable', ph: 'Ej: Supervisora de enfermería' },
+            { label: 'Indicador', key: 'indicador', ph: 'Cómo medir que se cumple...' },
+          ].map(f => (
+            <div key={f.key} style={{ marginBottom: '12px' }}>
+              <div style={labelStyle}>{f.label}</div>
+              <input value={nueva[f.key]} onChange={e => setNueva(p => ({ ...p, [f.key]: e.target.value }))} placeholder={f.ph} style={inputStyle(nueva[f.key])} />
+            </div>
           ))}
-          <div style={{ marginBottom: '12px' }}><div style={labelStyle}>Plazo</div><input type="date" value={nueva.plazo} onChange={e => setNueva(p => ({ ...p, plazo: e.target.value }))} style={inputStyle(nueva.plazo)} /></div>
+          <div style={{ marginBottom: '12px' }}>
+            <div style={labelStyle}>Plazo</div>
+            <input type="date" value={nueva.plazo} onChange={e => setNueva(p => ({ ...p, plazo: e.target.value }))} style={inputStyle(nueva.plazo)} />
+          </div>
           <BtnPrincipal onClick={crear} label="Guardar acción" activo={!!nueva.descripcion} />
         </div>
       )}
-      {acciones.length === 0 && !añadiendo && <div style={{ textAlign: 'center', padding: '30px', color: C.textoSuave }}>Añade las acciones del plan de mejora</div>}
+
+      {acciones.length === 0 && !añadiendo && !generandoPlan && (
+        <div style={{ textAlign: 'center', padding: '30px', color: C.textoSuave }}>
+          {esAMFE ? 'Genera el plan con IA o añade acciones manualmente' : 'Añade las acciones del plan de mejora'}
+        </div>
+      )}
+
+      {/* Lista de acciones */}
       {acciones.map((a, i) => (
-        <div key={i} style={{ background: C.blanco, borderRadius: '12px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+        <div key={i} style={{
+          background: C.blanco, borderRadius: '12px', padding: '14px', marginBottom: '10px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+          borderLeft: `3px solid ${a.generada_ia ? C.morado : C.verde}`,
+        }}>
+          {a.generada_ia && (
+            <div style={{ fontSize: '10px', fontWeight: '700', color: C.morado, marginBottom: '4px', letterSpacing: '0.5px' }}>IA</div>
+          )}
           <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '6px', lineHeight: '1.4' }}>{a.descripcion}</div>
           {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
           {a.plazo && <div style={{ fontSize: '12px', color: C.textoSuave }}>📅 {new Date(a.plazo).toLocaleDateString('es-ES')}</div>}
           {a.indicador && <div style={{ fontSize: '12px', color: C.textoSuave }}>📊 {a.indicador}</div>}
+          {a.observaciones && <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px', fontStyle: 'italic' }}>{a.observaciones}</div>}
+          {a.comentarios_participantes && (
+            <div style={{ background: `${C.teal}10`, borderRadius: '8px', padding: '8px', marginTop: '8px', border: `1px solid ${C.teal}20` }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', color: C.teal, marginBottom: '3px' }}>💬 Comentarios de profesionales</div>
+              <div style={{ fontSize: '12px', color: C.texto }}>{a.comentarios_participantes}</div>
+            </div>
+          )}
           <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {['pendiente', 'en_curso', 'completada'].map(e => (
-              <button key={e} onClick={() => cambiarEstado(a.id, e)} style={{ padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: '700', background: a.estado === e ? ec[e] : `${ec[e]}18`, color: a.estado === e ? C.blanco : ec[e] }}>{e.replace('_', ' ')}</button>
+              <button key={e} onClick={() => cambiarEstado(a.id, e)} style={{
+                padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer',
+                fontFamily: "'DM Sans',sans-serif", fontWeight: '700',
+                background: a.estado === e ? ec[e] : `${ec[e]}18`,
+                color: a.estado === e ? C.blanco : ec[e],
+              }}>{e.replace('_', ' ')}</button>
             ))}
+            <button onClick={() => borrarAccion(a.id)} style={{
+              padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer',
+              fontFamily: "'DM Sans',sans-serif", fontWeight: '700',
+              background: `${C.rojo}18`, color: C.rojo,
+            }}>🗑</button>
           </div>
         </div>
       ))}
