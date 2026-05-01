@@ -13,6 +13,11 @@ export default function PaginaParticipante({ sesion, onLogout }) {
   const [error, setError] = useState('')
   const [cargando, setCargando] = useState(true)
   const [modulo, setModulo] = useState(null)
+  const [accionesPlан, setAccionesPlан] = useState([])
+  const [comentarios, setComentarios] = useState({})
+  const [propias, setPropias] = useState([{ descripcion: '', responsable: '' }, { descripcion: '', responsable: '' }])
+  const [enviandoComentarios, setEnviandoComentarios] = useState(false)
+  const [comentariosEnviados, setComentariosEnviados] = useState(false)
   const [yaAporto, setYaAporto] = useState(false)
   const [yaVoto, setYaVoto] = useState(false)
 
@@ -46,7 +51,56 @@ export default function PaginaParticipante({ sesion, onLogout }) {
 
     const { data: voto } = await supabase.from('votos').select('id').eq('participacion_id', part.id).eq('proceso_id', proc.id).limit(1)
     setYaVoto(!!(voto && voto.length > 0))
+    // Cargar acciones si está en plan_accion o seguimiento
+    if (['plan_accion', 'seguimiento', 'cerrado'].includes(proc.estado)) {
+      const { data: acts } = await supabase
+        .from('acciones')
+        .select('*')
+        .eq('proceso_id', proc.id)
+        .order('created_at')
+      setAccionesPlан(acts || [])
+      // Verificar si ya envió comentarios
+      if (part) {
+        const { data: props } = await supabase
+          .from('propuestas_accion_participantes')
+          .select('id')
+          .eq('participacion_id', part.id)
+          .eq('proceso_id', proc.id)
+          .limit(1)
+        setComentariosEnviados(!!(props && props.length > 0))
+      }
+    }
     setCargando(false)
+  }
+
+  const enviarComentariosYPropuestas = async () => {
+    if (!participacion?.id || !proceso?.id) return
+    setEnviandoComentarios(true)
+    try {
+      // Guardar comentarios en cada acción
+      for (const [accionId, texto] of Object.entries(comentarios)) {
+        if (texto.trim()) {
+          const { data: accion } = await supabase.from('acciones').select('comentarios_participantes').eq('id', accionId).single()
+          const previo = accion?.comentarios_participantes || ''
+          const nuevo = previo ? `${previo}
+[${participacion.categoria}]: ${texto}` : `[${participacion.categoria}]: ${texto}`
+          await supabase.from('acciones').update({ comentarios_participantes: nuevo }).eq('id', accionId)
+        }
+      }
+      // Guardar propuestas propias
+      for (const p of propias) {
+        if (p.descripcion.trim()) {
+          await supabase.from('propuestas_accion_participantes').insert({
+            proceso_id: proceso.id,
+            participacion_id: participacion.id,
+            descripcion: p.descripcion.trim(),
+            responsable: p.responsable.trim() || null,
+          })
+        }
+      }
+      setComentariosEnviados(true)
+    } catch (e) { console.error(e) }
+    setEnviandoComentarios(false)
   }
 
   const colorTipo = proceso?.tipo === 'lean' ? C.verde : proceso?.tipo === 'rca' ? C.rojo : C.morado
@@ -130,8 +184,68 @@ export default function PaginaParticipante({ sesion, onLogout }) {
                   </>
             )}
 
-            {proceso.estado === 'plan_accion' && <AlertaInfo titulo="📋 Plan de acción en elaboración" texto="El coordinador está elaborando el plan de acción con las propuestas mejor valoradas." color={C.azul} />}
-            {proceso.estado === 'seguimiento' && <AlertaInfo titulo="📊 Fase de seguimiento" texto="El plan de acción está en marcha. Consulta con el coordinador el estado de las acciones." color={C.verdeClaro} />}
+            {proceso.estado === 'plan_accion' && (
+              comentariosEnviados ? (
+                <AlertaInfo titulo="✅ Comentarios y propuestas enviados" texto="El coordinador revisará tus aportaciones al plan de acción. Gracias por tu participación." color={C.verde} />
+              ) : (
+                <div>
+                  {accionesPlан.length > 0 && (
+                    <>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: C.texto, marginBottom: '12px' }}>
+                        📋 Plan de acción propuesto — revisa y comenta
+                      </div>
+                      {accionesPlан.map((a, i) => (
+                        <div key={i} style={{ background: C.blanco, borderRadius: '14px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderLeft: `3px solid ${colorTipo}` }}>
+                          <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '6px' }}>{a.descripcion}</div>
+                          {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
+                          {a.plazo && <div style={{ fontSize: '12px', color: C.textoSuave }}>📅 {new Date(a.plazo).toLocaleDateString('es-ES')}</div>}
+                          {a.indicador && <div style={{ fontSize: '12px', color: C.textoSuave }}>📊 {a.indicador}</div>}
+                          <div style={{ marginTop: '10px' }}>
+                            <div style={{ fontSize: '11px', fontWeight: '700', color: C.textoSuave, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '5px' }}>Tu comentario (opcional)</div>
+                            <textarea
+                              value={comentarios[a.id] || ''}
+                              onChange={e => setComentarios(prev => ({ ...prev, [a.id]: e.target.value }))}
+                              placeholder="¿Tienes algún comentario sobre esta acción?"
+                              rows={2}
+                              style={{ width: '100%', padding: '10px', border: `1px solid ${C.grisMedio}`, borderRadius: '8px', fontSize: '13px', fontFamily: "'DM Sans',sans-serif", resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ marginTop: '16px', marginBottom: '8px' }}>
+                        <div style={{ fontSize: '14px', fontWeight: '600', color: C.texto, marginBottom: '4px' }}>¿Quieres proponer alguna acción adicional?</div>
+                        <div style={{ fontSize: '12px', color: C.textoSuave, marginBottom: '12px' }}>Máximo 2 propuestas. El coordinador decidirá si incorporarlas.</div>
+                        {propias.map((p, i) => (
+                          <div key={i} style={{ background: C.blanco, borderRadius: '12px', padding: '12px', marginBottom: '10px', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', border: `1px solid ${C.grisMedio}` }}>
+                            <div style={{ fontSize: '12px', fontWeight: '700', color: C.textoSuave, marginBottom: '6px' }}>Propuesta {i + 1} (opcional)</div>
+                            <input value={p.descripcion} onChange={e => setPropias(prev => prev.map((x, j) => j === i ? { ...x, descripcion: e.target.value } : x))}
+                              placeholder="Descripción de la acción propuesta..." style={{ width: '100%', padding: '10px', border: `1px solid ${C.grisMedio}`, borderRadius: '8px', fontSize: '13px', fontFamily: "'DM Sans',sans-serif", marginBottom: '6px', boxSizing: 'border-box', outline: 'none' }} />
+                            <input value={p.responsable} onChange={e => setPropias(prev => prev.map((x, j) => j === i ? { ...x, responsable: e.target.value } : x))}
+                              placeholder="Responsable sugerido (opcional)..." style={{ width: '100%', padding: '10px', border: `1px solid ${C.grisMedio}`, borderRadius: '8px', fontSize: '13px', fontFamily: "'DM Sans',sans-serif", boxSizing: 'border-box', outline: 'none' }} />
+                          </div>
+                        ))}
+                      </div>
+                      <BtnPrincipal onClick={enviarComentariosYPropuestas} label={enviandoComentarios ? 'Enviando...' : 'Enviar comentarios y propuestas'} activo={!enviandoComentarios} color={colorTipo} />
+                    </>
+                  )}
+                  {accionesPlан.length === 0 && (
+                    <AlertaInfo titulo="📋 Plan de acción en elaboración" texto="El coordinador está elaborando el plan de acción. Cuando esté disponible podrás revisarlo y añadir comentarios." color={C.azul} />
+                  )}
+                </div>
+              )
+            )}
+            {proceso.estado === 'seguimiento' && (
+              <div>
+                <AlertaInfo titulo="📊 Fase de seguimiento activa" texto="El plan de acción está en marcha." color={C.verdeClaro} />
+                {accionesPlан.length > 0 && accionesPlан.map((a, i) => (
+                  <div key={i} style={{ background: C.blanco, borderRadius: '12px', padding: '12px', marginBottom: '8px', boxShadow: '0 2px 6px rgba(0,0,0,0.04)', borderLeft: `3px solid ${{ pendiente: C.naranja, en_curso: C.azul, completada: C.verde }[a.estado] || C.naranja}` }}>
+                    <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto }}>{a.descripcion}</div>
+                    {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
+                    <div style={{ marginTop: '6px' }}><span style={{ padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', background: `${{ pendiente: C.naranja, en_curso: C.azul, completada: C.verde }[a.estado] || C.naranja}18`, color: { pendiente: C.naranja, en_curso: C.azul, completada: C.verde }[a.estado] || C.naranja }}>{a.estado?.replace('_', ' ')}</span></div>
+                  </div>
+                ))}
+              </div>
+            )}
             {proceso.estado === 'cerrado' && <AlertaInfo titulo="✅ Proceso finalizado" texto="Gracias por tu participación en la mejora de tu unidad." color="#999" />}
           </>
         )}
