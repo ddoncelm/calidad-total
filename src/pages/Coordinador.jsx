@@ -629,26 +629,29 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
     onRefresh()
   }
 
+  const cambiarFactibilidad = async (id, factibilidad) => {
+    await supabase.from('acciones').update({ factibilidad }).eq('id', id)
+    onRefresh()
+  }
+
   const borrarAccion = async (id) => {
     await supabase.from('acciones').delete().eq('id', id)
     onRefresh()
   }
 
   const ec = { pendiente: C.naranja, en_curso: C.azul, completada: C.verde, cancelada: '#999' }
+  const factColor = { Alta: C.verde, Media: C.naranja, Baja: C.rojo }
   const accionesIA = acciones.filter(a => a.generada_ia)
-  const accionesManuales = acciones.filter(a => !a.generada_ia)
   const propuestasPendientes = (propuestasParticipantes || []).filter(p => !p.incorporada)
 
   return (
     <div>
-      {/* Botón generar plan con IA — solo AMFE */}
-      {esAMFE && acciones.filter(a => a.generada_ia).length === 0 && (
+      {/* Botón generar plan con IA */}
+      {esAMFE && accionesIA.length === 0 && (
         <div style={{ background: `${C.morado}10`, border: `1px solid ${C.morado}30`, borderRadius: '14px', padding: '14px', marginBottom: '16px' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '6px' }}>
-            🤖 Generación automática del plan de acción
-          </div>
+          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '6px' }}>🤖 Generación automática del plan de acción</div>
           <div style={{ fontSize: '12px', color: C.textoSuave, marginBottom: '10px', lineHeight: '1.5' }}>
-            La IA analizará el ranking NPR y propondrá acciones concretas para cada modo de fallo crítico y moderado, con responsable, plazo e indicador.
+            La IA propondrá acciones concretas para cada modo de fallo crítico y moderado, con responsable, plazo e indicador.
           </div>
           {generandoPlan
             ? <CargandoIA color={C.morado} mensaje="Generando plan de acción..." />
@@ -668,22 +671,16 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
       {propuestasPendientes.length > 0 && (
         <div style={{ background: `${C.teal}10`, border: `1px solid ${C.teal}30`, borderRadius: '14px', padding: '14px', marginBottom: '16px' }}>
           <div style={{ fontSize: '13px', fontWeight: '700', color: C.teal, marginBottom: '10px' }}>
-            💬 {propuestasPendientes.length} propuesta(s) de participantes pendientes de revisión
+            💬 {propuestasPendientes.length} propuesta(s) de participantes
           </div>
           {propuestasPendientes.map((p, i) => (
             <div key={i} style={{ background: C.blanco, borderRadius: '10px', padding: '12px', marginBottom: '8px', border: `1px solid ${C.teal}20` }}>
               <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '4px' }}>{p.descripcion}</div>
               {p.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {p.responsable}</div>}
-              <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px' }}>
-                Propuesto por: {p.participaciones?.categoria || 'Participante'}
-              </div>
+              <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px' }}>Propuesto por: {p.participaciones?.categoria || 'Participante'}</div>
               <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                <button onClick={() => onIncorporar(p)} style={{ flex: 1, padding: '7px', border: 'none', borderRadius: '8px', background: C.verde, color: C.blanco, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                  ✅ Incorporar al plan
-                </button>
-                <button onClick={async () => { await supabase.from('propuestas_accion_participantes').update({ incorporada: true }).eq('id', p.id); onRefresh() }} style={{ flex: 1, padding: '7px', border: `1px solid ${C.rojo}30`, borderRadius: '8px', background: `${C.rojo}10`, color: C.rojo, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                  ❌ Descartar
-                </button>
+                <button onClick={() => onIncorporar(p)} style={{ flex: 1, padding: '7px', border: 'none', borderRadius: '8px', background: C.verde, color: C.blanco, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>✅ Incorporar</button>
+                <button onClick={async () => { await supabase.from('propuestas_accion_participantes').update({ incorporada: true }).eq('id', p.id); onRefresh() }} style={{ flex: 1, padding: '7px', border: `1px solid ${C.rojo}30`, borderRadius: '8px', background: `${C.rojo}10`, color: C.rojo, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>❌ Descartar</button>
               </div>
             </div>
           ))}
@@ -719,16 +716,10 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
         </div>
       )}
 
-      {/* Lista de acciones */}
+      {/* Lista de acciones con factibilidad */}
       {acciones.map((a, i) => (
-        <div key={i} style={{
-          background: C.blanco, borderRadius: '12px', padding: '14px', marginBottom: '10px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-          borderLeft: `3px solid ${a.generada_ia ? C.morado : C.verde}`,
-        }}>
-          {a.generada_ia && (
-            <div style={{ fontSize: '10px', fontWeight: '700', color: C.morado, marginBottom: '4px', letterSpacing: '0.5px' }}>IA</div>
-          )}
+        <div key={i} style={{ background: C.blanco, borderRadius: '12px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderLeft: `3px solid ${a.generada_ia ? C.morado : C.verde}` }}>
+          {a.generada_ia && <div style={{ fontSize: '10px', fontWeight: '700', color: C.morado, marginBottom: '4px', letterSpacing: '0.5px' }}>🤖 IA</div>}
           <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '6px', lineHeight: '1.4' }}>{a.descripcion}</div>
           {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
           {a.plazo && <div style={{ fontSize: '12px', color: C.textoSuave }}>📅 {new Date(a.plazo).toLocaleDateString('es-ES')}</div>}
@@ -740,7 +731,26 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
               <div style={{ fontSize: '12px', color: C.texto }}>{a.comentarios_participantes}</div>
             </div>
           )}
-          <div style={{ marginTop: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+
+          {/* Factibilidad */}
+          <div style={{ marginTop: '10px', marginBottom: '8px' }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: C.textoSuave, letterSpacing: '0.4px', textTransform: 'uppercase', marginBottom: '6px' }}>Factibilidad</div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {['Alta', 'Media', 'Baja'].map(f => (
+                <button key={f} onClick={() => cambiarFactibilidad(a.id, f)} style={{
+                  flex: 1, padding: '7px 4px', borderRadius: '8px', border: `2px solid ${a.factibilidad === f ? factColor[f] : '#e0e0e0'}`,
+                  background: a.factibilidad === f ? `${factColor[f]}18` : C.blanco,
+                  color: a.factibilidad === f ? factColor[f] : C.textoSuave,
+                  fontWeight: '700', fontSize: '12px', cursor: 'pointer',
+                  fontFamily: "'DM Sans',sans-serif",
+                }}>{f}</button>
+              ))}
+            </div>
+            {!a.factibilidad && <div style={{ fontSize: '10px', color: '#aaa', marginTop: '4px' }}>Sin valorar — selecciona Alta, Media o Baja</div>}
+          </div>
+
+          {/* Estado */}
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {['pendiente', 'en_curso', 'completada'].map(e => (
               <button key={e} onClick={() => cambiarEstado(a.id, e)} style={{
                 padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer',
@@ -749,11 +759,7 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
                 color: a.estado === e ? C.blanco : ec[e],
               }}>{e.replace('_', ' ')}</button>
             ))}
-            <button onClick={() => borrarAccion(a.id)} style={{
-              padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer',
-              fontFamily: "'DM Sans',sans-serif", fontWeight: '700',
-              background: `${C.rojo}18`, color: C.rojo,
-            }}>🗑</button>
+            <button onClick={() => borrarAccion(a.id)} style={{ padding: '4px 10px', borderRadius: '20px', border: 'none', fontSize: '11px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: '700', background: `${C.rojo}18`, color: C.rojo }}>🗑</button>
           </div>
         </div>
       ))}
@@ -761,7 +767,7 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
   )
 }
 
-// ── TAB PINES ──────────────────────────────────────────────────
+
 function TabPines({ procesoId }) {
   const [pines, setPines] = useState([])
   const [nuevoPin, setNuevoPin] = useState('')
@@ -820,10 +826,15 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
   const [participantes, setParticipantes] = useState('')
   const [coordinadores, setCoordinadores] = useState('')
   const [guardandoMeta, setGuardandoMeta] = useState(false)
-  const [factibilidades, setFactibilidades] = useState({})
-  const [guardandoFact, setGuardandoFact] = useState(false)
 
-  const modos = (fusiones && fusiones.length > 0) ? fusiones : ranking
+  // Cargar metadatos guardados
+  useState(() => {
+    supabase.from('procesos').select('informe_participantes,informe_coordinadores').eq('id', proceso.id).single()
+      .then(({ data }) => {
+        if (data?.informe_coordinadores) setCoordinadores(data.informe_coordinadores)
+        if (data?.informe_participantes) setParticipantes(data.informe_participantes)
+      })
+  })
 
   const guardarMetadatos = async () => {
     setGuardandoMeta(true)
@@ -834,80 +845,67 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
     setGuardandoMeta(false)
   }
 
-  const guardarFactibilidades = async () => {
-    setGuardandoFact(true)
-    for (const [id, texto] of Object.entries(factibilidades)) {
-      await supabase.from('fusiones_amfe').update({ factibilidad: texto }).eq('id', id)
-    }
-    if (onActualizarFusiones) await onActualizarFusiones()
-    setGuardandoFact(false)
+  const modos = (fusiones && fusiones.length > 0) ? fusiones : ranking
+  const cats = [...new Set(aportaciones.map(a => a.participaciones?.categoria).filter(Boolean))]
+
+  // Construir filas tabla AMFE opción B (una fila por acción)
+  const construirFilasAMFE = () => {
+    if (acciones.length === 0) return []
+    return acciones.map(accion => {
+      // Buscar el modo de fallo asociado a esta acción
+      const modoTexto = accion.observaciones?.replace('Modo de fallo: ', '') || ''
+      const modo = modos.find(m =>
+        (m.modo_fusionado || m.modo_fallo)?.toLowerCase().includes(modoTexto.toLowerCase().substring(0, 20)) ||
+        modoTexto.toLowerCase().includes((m.modo_fusionado || m.modo_fallo)?.toLowerCase().substring(0, 20))
+      ) || {}
+      const paso = pasos?.find(p => p.id === modo.paso_id) || {}
+      return { accion, modo, paso }
+    })
   }
 
-  const cats = [...new Set(aportaciones.map(a => a.participaciones?.categoria).filter(Boolean))]
+  const filasAMFE = esAMFE ? construirFilasAMFE() : []
+  const accionesSinFact = acciones.filter(a => !a.factibilidad)
 
   return (
     <div>
-      {/* Campos de metadatos — solo para AMFE */}
-      {esAMFE && (
-        <div style={{ background: C.blanco, borderRadius: '16px', padding: '16px', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '12px' }}>
-            📋 Datos del informe
-          </div>
-          <div style={{ marginBottom: '12px' }}>
-            <div style={labelStyle}>Coordinadores de calidad (uno por línea)</div>
-            <textarea value={coordinadores} onChange={e => setCoordinadores(e.target.value)}
-              placeholder="Nombre y apellidos del coordinador&#10;Nombre y apellidos de otro coordinador..."
-              rows={3} style={{ ...inputStyle(coordinadores), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.5' }} />
-          </div>
-          <div style={{ marginBottom: '12px' }}>
-            <div style={labelStyle}>Participantes (uno por línea, opcional)</div>
-            <div style={{ fontSize: '11px', color: C.textoSuave, marginBottom: '6px' }}>
-              Categorías detectadas: <strong>{cats.join(', ') || '—'}</strong>
-            </div>
-            <textarea value={participantes} onChange={e => setParticipantes(e.target.value)}
-              placeholder="Nombre y categoría del participante&#10;Nombre y categoría del participante..."
-              rows={4} style={{ ...inputStyle(participantes), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.5' }} />
-          </div>
-          <BtnPrincipal onClick={guardarMetadatos} label={guardandoMeta ? 'Guardando...' : 'Guardar datos'} activo={!guardandoMeta} color={C.teal} style={{ marginTop: 0 }} />
-        </div>
+      {/* Aviso factibilidad pendiente */}
+      {esAMFE && accionesSinFact.length > 0 && (
+        <AlertaInfo
+          titulo={`⚠ ${accionesSinFact.length} acción(es) sin factibilidad valorada`}
+          texto="Ve al tab Acciones y selecciona Alta, Media o Baja para cada acción antes de generar el informe."
+          color={C.naranja}
+        />
       )}
 
-      {/* Factibilidad por modo de fallo — solo AMFE */}
-      {esAMFE && modos.length > 0 && (
-        <div style={{ background: C.blanco, borderRadius: '16px', padding: '16px', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-          <div style={{ fontSize: '13px', fontWeight: '700', color: C.morado, marginBottom: '12px' }}>
-            ⚙️ Factibilidad / Viabilidad por modo de fallo
-          </div>
-          {modos.map((m, i) => (
-            <div key={m.id || i} style={{ marginBottom: '10px', paddingBottom: '10px', borderBottom: i < modos.length - 1 ? `1px solid ${C.grisMedio}` : 'none' }}>
-              <div style={{ fontSize: '12px', fontWeight: '600', color: C.texto, marginBottom: '5px' }}>
-                {i + 1}. {m.modo_fusionado || m.modo_fallo}
-                <span style={{ marginLeft: '8px', fontSize: '11px', color: m.npr_medio >= 100 || m.severidad_media >= 8 ? C.rojo : C.textoSuave }}>
-                  NPR {Number(m.npr_medio).toFixed(0)}
-                </span>
-              </div>
-              <input
-                value={factibilidades[m.id] !== undefined ? factibilidades[m.id] : (m.factibilidad || '')}
-                onChange={e => setFactibilidades(prev => ({ ...prev, [m.id]: e.target.value }))}
-                placeholder="Valoración de factibilidad y viabilidad de las acciones..."
-                style={{ ...inputStyle(factibilidades[m.id] || m.factibilidad), fontSize: '12px' }}
-              />
-            </div>
-          ))}
-          <BtnPrincipal onClick={guardarFactibilidades} label={guardandoFact ? 'Guardando...' : 'Guardar factibilidades'} activo={!guardandoFact} color={C.morado} style={{ marginTop: '8px' }} />
+      {/* Metadatos del informe */}
+      <div style={{ background: C.blanco, borderRadius: '16px', padding: '16px', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+        <div style={{ fontSize: '13px', fontWeight: '700', color: C.verde, marginBottom: '12px' }}>📋 Datos del informe</div>
+        <div style={{ marginBottom: '12px' }}>
+          <div style={labelStyle}>Coordinadores de calidad (uno por línea)</div>
+          <textarea value={coordinadores} onChange={e => setCoordinadores(e.target.value)}
+            placeholder={'Nombre y apellidos del coordinador\nNombre de otro coordinador...'}
+            rows={3} style={{ ...inputStyle(coordinadores), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.5' }} />
         </div>
-      )}
+        <div style={{ marginBottom: '12px' }}>
+          <div style={labelStyle}>Participantes con nombre (uno por línea, opcional)</div>
+          <div style={{ fontSize: '11px', color: C.textoSuave, marginBottom: '6px' }}>
+            Categorías detectadas: <strong>{cats.join(', ') || '—'}</strong>
+          </div>
+          <textarea value={participantes} onChange={e => setParticipantes(e.target.value)}
+            placeholder={'Nombre Apellidos — Enfermero/a\nNombre Apellidos — Médico/a especialista...'}
+            rows={4} style={{ ...inputStyle(participantes), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.5' }} />
+        </div>
+        <BtnPrincipal onClick={guardarMetadatos} label={guardandoMeta ? 'Guardando...' : 'Guardar datos'} activo={!guardandoMeta} color={C.teal} style={{ marginTop: 0 }} />
+      </div>
 
       {/* Resumen IA */}
       {!informe && !generandoInforme && (
-        <AlertaInfo titulo="Informe no generado" texto="Rellena los datos del informe y genera el resumen ejecutivo con IA." color={C.azul} />
+        <AlertaInfo titulo="Resumen no generado" texto="Completa los datos del informe y genera el resumen ejecutivo con IA." color={C.azul} />
       )}
-      {generandoInforme && <CargandoIA color={C.verde} mensaje="Generando informe ejecutivo con IA..." />}
+      {generandoInforme && <CargandoIA color={C.verde} mensaje="Generando resumen ejecutivo con IA..." />}
       {informe && !generandoInforme && (
         <div style={{ background: `${C.verde}08`, border: `1px solid ${C.verde}20`, borderRadius: '16px', padding: '20px', marginBottom: '20px' }}>
-          <div style={{ fontSize: '12px', fontWeight: '700', color: C.verde, marginBottom: '12px' }}>
-            🤖 RESUMEN EJECUTIVO · {proceso.codigo}
-          </div>
+          <div style={{ fontSize: '12px', fontWeight: '700', color: C.verde, marginBottom: '12px' }}>🤖 RESUMEN EJECUTIVO · {proceso.codigo}</div>
           <div style={{ fontSize: '13px', color: C.texto, lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{informe.contenido_ia}</div>
         </div>
       )}
@@ -918,24 +916,23 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
       {informe && (
         <>
           <div style={{ fontSize: '12px', fontWeight: '700', color: C.textoSuave, marginTop: '20px', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            {esAMFE ? 'Informe AMFE completo' : 'Informe del proceso'}
+            {esAMFE ? 'Informe AMFE completo (tabla apaisada)' : 'Informe del proceso'}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <button onClick={() => esAMFE
-              ? exportarInformeAMFEPDF({ proceso, pasos: pasos || [], modos: modos || [], acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
+              ? exportarInformeAMFEPDF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
               : exportarPDF(proceso, informe?.contenido_ia, ranking, acciones, aportaciones, false)
             } style={{ padding: '14px', border: `2px solid ${C.rojo}`, borderRadius: '12px', background: `${C.rojo}10`, color: C.rojo, fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
               📄 PDF {esAMFE ? '(Tabla AMFE)' : ''}
             </button>
             <button onClick={() => esAMFE
-              ? exportarInformeAMFERTF({ proceso, pasos: pasos || [], modos: modos || [], acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
+              ? exportarInformeAMFERTF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
               : exportarRTF(proceso, informe?.contenido_ia, ranking, acciones, aportaciones, false)
             } style={{ padding: '14px', border: `2px solid ${C.azul}`, borderRadius: '12px', background: `${C.azul}10`, color: C.azul, fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
               📝 RTF {esAMFE ? '(Word)' : ''}
             </button>
           </div>
 
-          {/* Documento de seguimiento — solo si hay acciones */}
           {acciones.length > 0 && (
             <>
               <div style={{ fontSize: '12px', fontWeight: '700', color: C.textoSuave, marginTop: '16px', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -958,4 +955,3 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
     </div>
   )
 }
-
