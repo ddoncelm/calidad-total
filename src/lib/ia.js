@@ -230,3 +230,41 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
   "observaciones": "Texto sobre los modos leves y recomendaciones generales"
 }`
 }
+
+// ── AMFE: resumen narrativo para informe completo ──────────────
+export function promptResumenInformeAMFE({ proceso, pasos, modos, acciones, categorias, coordinadores }) {
+  const criticos = modos.filter(m => m.npr_medio >= 100 || m.severidad_media >= 8)
+  const topModos = modos.slice(0, 5).map(m =>
+    `- ${m.modo_fusionado || m.modo_fallo} (NPR: ${Number(m.npr_medio).toFixed(0)}, S:${Number(m.severidad_media).toFixed(1)} O:${Number(m.ocurrencia_media).toFixed(1)} D:${Number(m.detectabilidad_media).toFixed(1)})`
+  ).join('\n')
+  const accionesTexto = acciones.slice(0, 8).map(a =>
+    `- ${a.descripcion} | Responsable: ${a.responsable || 'Por definir'} | Plazo: ${a.plazo || 'Por definir'}`
+  ).join('\n')
+
+  return `Eres experto en seguridad del paciente y AMFE sanitario del SAS/SSPA. Redacta el resumen ejecutivo de un informe AMFE profesional.
+
+DATOS DEL PROCESO:
+Título: ${proceso.titulo}
+Unidad: ${proceso.unidad}
+Pasos analizados: ${pasos.length}
+Total modos de fallo evaluados: ${modos.length}
+Modos críticos (NPR≥100 o S≥8): ${criticos.length}
+Categorías profesionales participantes: ${categorias.join(', ')}
+Coordinadores de calidad: ${coordinadores || 'No especificado'}
+
+MODOS DE FALLO MÁS RELEVANTES:
+${topModos || 'Sin datos'}
+
+ACCIONES DE MEJORA PLANTEADAS:
+${accionesTexto || 'Pendiente de definir'}
+
+Redacta el informe con estas secciones en texto narrativo profesional:
+1. RESUMEN EJECUTIVO (3-4 frases con los hallazgos más importantes)
+2. DESCRIPCIÓN DEL PROCESO ANALIZADO (contexto y alcance)
+3. METODOLOGÍA UTILIZADA (descripción breve del AMFE y escalas S/O/D)
+4. PRINCIPALES RIESGOS IDENTIFICADOS (análisis de los modos de fallo críticos)
+5. PLAN DE ACCIÓN (descripción de las acciones propuestas y su impacto esperado)
+6. CONCLUSIONES Y RECOMENDACIONES
+
+Usa lenguaje profesional, riguroso y adaptado al entorno sanitario público español. Máximo 600 palabras.`
+}
