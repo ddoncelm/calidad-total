@@ -185,3 +185,48 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto a
 
 Los "independientes" son los IDs de modos que no deben fusionarse con ningún otro.`
 }
+
+// ── AMFE: generar plan de acción basado en ranking priorizado ──
+export function promptPlanAccionAMFE({ proceso, modos }) {
+  const criticos = modos.filter(m => m.npr_medio >= 100 || m.severidad_media >= 8)
+  const moderados = modos.filter(m => m.npr_medio >= 50 && m.npr_medio < 100 && m.severidad_media < 8)
+  const leves = modos.filter(m => m.npr_medio < 50 && m.severidad_media < 8)
+
+  const formatModo = (m) =>
+    `- "${m.modo_fusionado || m.modo_fallo}" | NPR:${Number(m.npr_medio).toFixed(0)} | S:${Number(m.severidad_media).toFixed(1)} O:${Number(m.ocurrencia_media).toFixed(1)} D:${Number(m.detectabilidad_media).toFixed(1)} | Efecto: ${m.efecto || 'No especificado'} | Causa: ${m.causa || 'No especificada'}`
+
+  return `Eres experto en seguridad del paciente y gestión de riesgos sanitarios del SAS/SSPA.
+
+Has analizado el proceso "${proceso.titulo}" en la unidad "${proceso.unidad}" mediante AMFE.
+
+MODOS DE FALLO CRÍTICOS (NPR≥100 o Severidad≥8) — requieren acción urgente:
+${criticos.length > 0 ? criticos.map(formatModo).join('\n') : 'Ninguno'}
+
+MODOS DE FALLO MODERADOS (NPR 50-99):
+${moderados.length > 0 ? moderados.map(formatModo).join('\n') : 'Ninguno'}
+
+MODOS DE FALLO LEVES (NPR<50):
+${leves.length > 0 ? leves.map(formatModo).join('\n') : 'Ninguno'}
+
+Genera un plan de acción siguiendo estas reglas estrictas:
+- Para cada modo CRÍTICO: propón exactamente 2 acciones correctoras
+- Para cada modo MODERADO: propón exactamente 1 acción correctora
+- Para los modos LEVES: solo menciónalos en observaciones, sin acciones específicas
+- Cada acción debe tener: descripción concreta, responsable por cargo genérico (no nombre), plazo orientativo en meses e indicador de seguimiento medible
+- Las acciones deben ser específicas, realizables en el entorno del SAS y basadas en la causa raíz identificada
+
+Responde ÚNICAMENTE con un JSON válido con esta estructura exacta, sin texto adicional:
+{
+  "acciones": [
+    {
+      "descripcion": "Descripción concreta de la acción",
+      "responsable": "Cargo genérico responsable",
+      "plazo_meses": 3,
+      "indicador": "Cómo medir que se ha cumplido",
+      "modo_origen": "Modo de fallo al que responde",
+      "prioridad": "alta|media|baja"
+    }
+  ],
+  "observaciones": "Texto sobre los modos leves y recomendaciones generales"
+}`
+}
