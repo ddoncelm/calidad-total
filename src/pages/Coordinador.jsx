@@ -402,7 +402,7 @@ function DetalleProceso({ proceso: procesoProp, onVolver }) {
             )}
             {tab === 'acciones' && <TabAcciones acciones={acciones} procesoId={proceso.id} onRefresh={cargarTodo} esAMFE={proceso.tipo === 'amfe'} generandoPlan={generandoPlan} onGenerarPlan={generarPlanAccionIA} propuestasParticipantes={propuestasParticipantes} onIncorporar={incorporarPropuesta} />}
             {tab === 'pines' && <TabPines procesoId={proceso.id} />}
-            {tab === 'informe' && <TabInforme informe={informe} proceso={proceso} ranking={proceso.tipo === 'amfe' ? rankingAmfe : ranking} fusiones={fusiones} pasos={pasos} acciones={acciones} aportaciones={aportaciones} generandoInforme={generandoInforme} onGenerar={generarInforme} esAMFE={proceso.tipo === 'amfe'} onActualizarFusiones={cargarTodo} />}
+            {tab === 'informe' && <TabInforme informe={informe} proceso={proceso} ranking={proceso.tipo === 'amfe' ? rankingAmfe : ranking} fusiones={fusiones} pasos={pasos} acciones={acciones} aportaciones={aportaciones} generandoInforme={generandoInforme} onGenerar={generarInforme} esAMFE={proceso.tipo === 'amfe'} onActualizarFusiones={cargarTodo} onCerrar={() => setTab(proceso.tipo === 'amfe' ? 'acciones' : 'acciones')} />}
           </>
         )}
       </div>
@@ -615,12 +615,30 @@ function TabRanking({ ranking }) {
 function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, onGenerarPlan, propuestasParticipantes, onIncorporar }) {
   const [nueva, setNueva] = useState({ descripcion: '', responsable: '', plazo: '', indicador: '' })
   const [añadiendo, setAñadiendo] = useState(false)
+  const [editandoId, setEditandoId] = useState(null)
+  const [datosEdicion, setDatosEdicion] = useState({})
 
   const crear = async () => {
     if (!nueva.descripcion) return
     await supabase.from('acciones').insert({ proceso_id: procesoId, ...nueva })
     setNueva({ descripcion: '', responsable: '', plazo: '', indicador: '' })
     setAñadiendo(false)
+    onRefresh()
+  }
+
+  const iniciarEdicion = (a) => {
+    setEditandoId(a.id)
+    setDatosEdicion({
+      descripcion: a.descripcion || '',
+      responsable: a.responsable || '',
+      plazo: a.plazo ? a.plazo.substring(0, 10) : '',
+      indicador: a.indicador || '',
+    })
+  }
+
+  const guardarEdicion = async (id) => {
+    await supabase.from('acciones').update(datosEdicion).eq('id', id)
+    setEditandoId(null)
     onRefresh()
   }
 
@@ -720,16 +738,47 @@ function TabAcciones({ acciones, procesoId, onRefresh, esAMFE, generandoPlan, on
       {acciones.map((a, i) => (
         <div key={i} style={{ background: C.blanco, borderRadius: '12px', padding: '14px', marginBottom: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderLeft: `3px solid ${a.generada_ia ? C.morado : C.verde}` }}>
           {a.generada_ia && <div style={{ fontSize: '10px', fontWeight: '700', color: C.morado, marginBottom: '4px', letterSpacing: '0.5px' }}>🤖 IA</div>}
-          <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, marginBottom: '6px', lineHeight: '1.4' }}>{a.descripcion}</div>
-          {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
-          {a.plazo && <div style={{ fontSize: '12px', color: C.textoSuave }}>📅 {new Date(a.plazo).toLocaleDateString('es-ES')}</div>}
-          {a.indicador && <div style={{ fontSize: '12px', color: C.textoSuave }}>📊 {a.indicador}</div>}
-          {a.observaciones && <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px', fontStyle: 'italic' }}>{a.observaciones}</div>}
-          {a.comentarios_participantes && (
-            <div style={{ background: `${C.teal}10`, borderRadius: '8px', padding: '8px', marginTop: '8px', border: `1px solid ${C.teal}20` }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', color: C.teal, marginBottom: '3px' }}>💬 Comentarios de profesionales</div>
-              <div style={{ fontSize: '12px', color: C.texto }}>{a.comentarios_participantes}</div>
+
+          {editandoId === a.id ? (
+            /* MODO EDICIÓN */
+            <div>
+              {[
+                { label: 'Descripción', key: 'descripcion', ph: 'Qué hay que hacer...' },
+                { label: 'Responsable', key: 'responsable', ph: 'Cargo o persona...' },
+                { label: 'Indicador', key: 'indicador', ph: 'Cómo medir que se cumple...' },
+              ].map(f => (
+                <div key={f.key} style={{ marginBottom: '8px' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '700', color: C.textoSuave, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>{f.label}</div>
+                  <input value={datosEdicion[f.key]} onChange={e => setDatosEdicion(p => ({ ...p, [f.key]: e.target.value }))} placeholder={f.ph} style={{ ...inputStyle(datosEdicion[f.key]), marginTop: 0 }} />
+                </div>
+              ))}
+              <div style={{ marginBottom: '10px' }}>
+                <div style={{ fontSize: '10px', fontWeight: '700', color: C.textoSuave, textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: '4px' }}>Plazo</div>
+                <input type="date" value={datosEdicion.plazo} onChange={e => setDatosEdicion(p => ({ ...p, plazo: e.target.value }))} style={{ ...inputStyle(datosEdicion.plazo), marginTop: 0 }} />
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => guardarEdicion(a.id)} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '8px', background: C.verde, color: C.blanco, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>💾 Guardar</button>
+                <button onClick={() => setEditandoId(null)} style={{ flex: 1, padding: '8px', border: `1px solid #e0e0e0`, borderRadius: '8px', background: C.blanco, color: C.textoSuave, fontSize: '12px', fontWeight: '700', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>Cancelar</button>
+              </div>
             </div>
+          ) : (
+            /* MODO VISUALIZACIÓN */
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: C.texto, lineHeight: '1.4', flex: 1, marginRight: '8px' }}>{a.descripcion}</div>
+                <button onClick={() => iniciarEdicion(a)} style={{ background: `${C.morado}15`, border: 'none', color: C.morado, borderRadius: '6px', padding: '3px 8px', cursor: 'pointer', fontSize: '11px', fontFamily: "'DM Sans',sans-serif", fontWeight: '700', flexShrink: 0 }}>✏️</button>
+              </div>
+              {a.responsable && <div style={{ fontSize: '12px', color: C.textoSuave }}>👤 {a.responsable}</div>}
+              {a.plazo && <div style={{ fontSize: '12px', color: C.textoSuave }}>📅 {new Date(a.plazo).toLocaleDateString('es-ES')}</div>}
+              {a.indicador && <div style={{ fontSize: '12px', color: C.textoSuave }}>📊 {a.indicador}</div>}
+              {a.observaciones && <div style={{ fontSize: '11px', color: C.textoSuave, marginTop: '4px', fontStyle: 'italic' }}>{a.observaciones}</div>}
+              {a.comentarios_participantes && (
+                <div style={{ background: `${C.teal}10`, borderRadius: '8px', padding: '8px', marginTop: '8px', border: `1px solid ${C.teal}20` }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: C.teal, marginBottom: '3px' }}>💬 Comentarios de profesionales</div>
+                  <div style={{ fontSize: '12px', color: C.texto }}>{a.comentarios_participantes}</div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Factibilidad */}
@@ -822,10 +871,12 @@ function TabPines({ procesoId }) {
 }
 
 // ── TAB INFORME ────────────────────────────────────────────────
-function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, aportaciones, generandoInforme, onGenerar, esAMFE, onActualizarFusiones }) {
+function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, aportaciones, generandoInforme, onGenerar, esAMFE, onActualizarFusiones, onCerrar }) {
   const [participantes, setParticipantes] = useState('')
   const [coordinadores, setCoordinadores] = useState('')
   const [guardandoMeta, setGuardandoMeta] = useState(false)
+  const [textoInformeEditado, setTextoInformeEditado] = useState('')
+  const [guardandoInforme, setGuardandoInforme] = useState(false)
 
   // Cargar metadatos guardados
   useState(() => {
@@ -836,6 +887,13 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
       })
   })
 
+  // Sincronizar texto editable cuando llega el informe
+  useEffect(() => {
+    if (informe?.contenido_ia && !textoInformeEditado) {
+      setTextoInformeEditado(informe.contenido_ia)
+    }
+  }, [informe])
+
   const guardarMetadatos = async () => {
     setGuardandoMeta(true)
     await supabase.from('procesos').update({
@@ -843,6 +901,13 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
       informe_coordinadores: coordinadores,
     }).eq('id', proceso.id)
     setGuardandoMeta(false)
+  }
+
+  const guardarInformeEditado = async () => {
+    if (!informe?.id) return
+    setGuardandoInforme(true)
+    await supabase.from('informes').update({ contenido_ia: textoInformeEditado }).eq('id', informe.id)
+    setGuardandoInforme(false)
   }
 
   const modos = (fusiones && fusiones.length > 0) ? fusiones : ranking
@@ -868,6 +933,12 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
 
   return (
     <div>
+      {/* Botón cerrar informe */}
+      <button
+        onClick={onCerrar}
+        style={{ background: 'none', border: `1px solid ${C.grisMedio}`, color: C.textoSuave, borderRadius: '8px', padding: '6px 14px', fontSize: '12px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif", fontWeight: '600', marginBottom: '16px' }}
+      >← Cerrar informe</button>
+
       {/* Aviso factibilidad pendiente */}
       {esAMFE && accionesSinFact.length > 0 && (
         <AlertaInfo
@@ -881,7 +952,7 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
       <div style={{ background: C.blanco, borderRadius: '16px', padding: '16px', marginBottom: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
         <div style={{ fontSize: '13px', fontWeight: '700', color: C.verde, marginBottom: '12px' }}>📋 Datos del informe</div>
         <div style={{ marginBottom: '12px' }}>
-          <div style={labelStyle}>Coordinadores de calidad (uno por línea)</div>
+          <div style={labelStyle}>Coordinadores del AMFE (uno por línea)</div>
           <textarea value={coordinadores} onChange={e => setCoordinadores(e.target.value)}
             placeholder={'Nombre y apellidos del coordinador\nNombre de otro coordinador...'}
             rows={3} style={{ ...inputStyle(coordinadores), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.5' }} />
@@ -906,7 +977,19 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
       {informe && !generandoInforme && (
         <div style={{ background: `${C.verde}08`, border: `1px solid ${C.verde}20`, borderRadius: '16px', padding: '20px', marginBottom: '20px' }}>
           <div style={{ fontSize: '12px', fontWeight: '700', color: C.verde, marginBottom: '12px' }}>🤖 RESUMEN EJECUTIVO · {proceso.codigo}</div>
-          <div style={{ fontSize: '13px', color: C.texto, lineHeight: '1.7', whiteSpace: 'pre-wrap' }}>{informe.contenido_ia}</div>
+          <textarea
+            value={textoInformeEditado}
+            onChange={e => setTextoInformeEditado(e.target.value)}
+            rows={14}
+            style={{ ...inputStyle(textoInformeEditado), resize: 'vertical', fontFamily: "'DM Sans',sans-serif", lineHeight: '1.7', fontSize: '13px', color: C.texto, whiteSpace: 'pre-wrap' }}
+          />
+          <BtnPrincipal
+            onClick={guardarInformeEditado}
+            label={guardandoInforme ? 'Guardando...' : '💾 Guardar cambios del resumen'}
+            activo={!guardandoInforme}
+            color={C.teal}
+            style={{ marginTop: '10px' }}
+          />
         </div>
       )}
 
@@ -920,14 +1003,14 @@ function TabInforme({ informe, proceso, ranking, fusiones, pasos, acciones, apor
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             <button onClick={() => esAMFE
-              ? exportarInformeAMFEPDF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
-              : exportarPDF(proceso, informe?.contenido_ia, ranking, acciones, aportaciones, false)
+              ? exportarInformeAMFEPDF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: textoInformeEditado, participantes, coordinadores })
+              : exportarPDF(proceso, textoInformeEditado, ranking, acciones, aportaciones, false)
             } style={{ padding: '14px', border: `2px solid ${C.rojo}`, borderRadius: '12px', background: `${C.rojo}10`, color: C.rojo, fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
               📄 PDF {esAMFE ? '(Tabla AMFE)' : ''}
             </button>
             <button onClick={() => esAMFE
-              ? exportarInformeAMFERTF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: informe?.contenido_ia, participantes, coordinadores })
-              : exportarRTF(proceso, informe?.contenido_ia, ranking, acciones, aportaciones, false)
+              ? exportarInformeAMFERTF({ proceso, pasos: pasos || [], filas: filasAMFE, acciones, aportaciones, resumenIA: textoInformeEditado, participantes, coordinadores })
+              : exportarRTF(proceso, textoInformeEditado, ranking, acciones, aportaciones, false)
             } style={{ padding: '14px', border: `2px solid ${C.azul}`, borderRadius: '12px', background: `${C.azul}10`, color: C.azul, fontWeight: '700', fontSize: '13px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
               📝 RTF {esAMFE ? '(Word)' : ''}
             </button>
